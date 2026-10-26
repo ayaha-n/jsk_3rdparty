@@ -75,17 +75,22 @@ class GoogleCloudStreamingRecognizer(object):
             for response in responses:
                 if self._stop_evt.is_set():
                     break
-                for result in response.results:
-                    if not result.alternatives:
-                        continue
-                    text = result.alternatives[0].transcript
-                    with self._lock:
-                        if text != self._latest_text:
-                            self._latest_text = text
-                            self._last_text_change = time.time()
-                        if (result.is_final and text.strip()
-                                and text != self._committed_text):
-                            self._endpoint = True
+                # An interim response splits the transcript into a stable
+                # head and an unstable tail, as separate results; join them,
+                # or only the tail would be kept.
+                texts = [result.alternatives[0].transcript
+                         for result in response.results if result.alternatives]
+                if not texts:
+                    continue
+                text = "".join(texts)
+                is_final = any(result.is_final for result in response.results)
+                with self._lock:
+                    if text != self._latest_text:
+                        self._latest_text = text
+                        self._last_text_change = time.time()
+                    if (is_final and text.strip()
+                            and text != self._committed_text):
+                        self._endpoint = True
         except Exception:
             # 305s session limit / network glitches — restart lazily on the
             # next accept_waveform().
